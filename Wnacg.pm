@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "4.3",
-        description  => "Download from wnacg.com (With Filename Fix)",
+        version      => "4.4",
+        description  => "Download from wnacg.com (HashRef Return Fix)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*'
     );
 }
@@ -24,12 +24,12 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v4.3 Triggered ---");
+    $logger->info("--- Wnacg Mojo v4.4 Triggered ---");
     
     # Normalize URL
     $url =~ s/photos-slide/photos-index/;
     
-    # 使用 LRR 提供的 UserAgent (具備快取與 Session 管理)
+    # 使用 LRR 提供的 UserAgent
     my $ua = $lrr_info->{user_agent};
     $ua->max_redirects(5);
 
@@ -69,11 +69,10 @@ sub provide_url {
                         my $save_path = $lrr_info->{tempdir} . "/$title.zip";
                         $logger->info("Downloading ZIP to $save_path...");
                         $ua->get($zip_url)->result->save_to($save_path);
-                        return ( path => $save_path );
+                        return { path => $save_path };
                     }
                     
-                    # 遵循官方規格回傳 download_url 列表 (備援方案)
-                    return ( download_url => $zip_url );
+                    return { download_url => $zip_url };
                 }
             }
         }
@@ -88,14 +87,13 @@ sub provide_url {
         
         if (scalar @images > 0) {
             $logger->info("SUCCESS: Found " . scalar @images . " images.");
-            # 如果是多圖下載，LRR 核心會處理 url_list
-            return ( url_list => \@images );
+            return { url_list => \@images };
         }
     } else {
-        return ( error => "HTTP " . $res->code );
+        return { error => "HTTP " . $res->code };
     }
 
-    return ( error => "No content found on Wnacg." );
+    return { error => "No content found on Wnacg." };
 }
 
 1;
