@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "4.9",
-        description  => "Download from wnacg.com (Final List + file_path Fix)",
+        version      => "5.0",
+        description  => "Download from wnacg.com (Title-based Filename Fix)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*'
     );
 }
@@ -24,7 +24,7 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v4.9 Triggered ---");
+    $logger->info("--- Wnacg Mojo v5.0 Triggered ---");
     
     # Normalize URL
     $url =~ s/photos-slide/photos-index/;
@@ -40,6 +40,22 @@ sub provide_url {
         my $html = $res->body;
         $logger->info("Index page fetched. Size: " . length($html));
 
+        # 提取標題作為檔名
+        my $title = "";
+        if ($html =~ m|<h2>(.*?)</h2>|is) {
+            $title = $1;
+            $title =~ s/<[^>]*>//g; # 移除 HTML 標籤
+            $title =~ s/[\r\n\t]//g; # 移除換行符
+            $title =~ s/[\/\\:\*\?"<>\|]/_/g; # 移除非法字元
+            $title =~ s/^\s+|\s+$//g; # 修剪空白
+            
+            # 限制長度，避免檔案系統報錯 (255 byte limit)
+            if (length($title) > 150) {
+                $title = substr($title, 0, 150);
+            }
+            $logger->info("Extracted title: $title");
+        }
+
         # 策略 1: ZIP 下載
         if ($html =~ m|href="(/download-index-aid-(\d+)\.html)"|i) {
             my $aid = $2;
@@ -54,9 +70,11 @@ sub provide_url {
                     $zip_url = "https:" . $zip_url if $zip_url =~ m|^//|;
                     $logger->info("SUCCESS: Found ZIP URL: $zip_url");
 
-                    # 下載並存檔 (使用 AID 命名確保路徑安全)
+                    # 使用標題作為檔名，若無標題則使用 AID
+                    my $filename = $title || "wnacg_$aid";
+                    
                     if ($lrr_info->{tempdir}) {
-                        my $save_path = $lrr_info->{tempdir} . "/wnacg_$aid.zip";
+                        my $save_path = $lrr_info->{tempdir} . "/$filename.zip";
                         $logger->info("Downloading ZIP to $save_path...");
                         
                         eval {
@@ -66,12 +84,11 @@ sub provide_url {
                         
                         if ($@) {
                             $logger->error("Download/Save failed: $@");
-                            return ( error => "Download failed: $@" );
+                            return ( download_url => $zip_url );
                         }
                         
                         if (-s $save_path) {
-                            $logger->info("Download complete. Handing off to LRR: $save_path");
-                            # 最終修正：回傳 List，且鍵名為 file_path
+                            $logger->info("Download complete. Handing off: $save_path");
                             return ( file_path => $save_path );
                         } else {
                             $logger->error("Saved file is empty or missing.");
