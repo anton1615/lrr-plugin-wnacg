@@ -1,10 +1,10 @@
-package LANraragi::Plugin::Download::Wnacg;
+package LANraragi::Plugin::Sideloaded::Wnacg;
 
 use strict;
 use warnings;
 
 use LANraragi::Utils::Logging qw(get_logger);
-use LANraragi::Utils::Generic; # 不使用匯入，改用全名調用
+use LANraragi::Utils::Generic;
 
 sub plugin_info {
     return (
@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "2.7",
-        description  => "Download from wnacg.com (Fixed Imports)",
+        version      => "2.8",
+        description  => "Download from wnacg.com (Sideloaded Fixed)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net)\/(?:photos-(?:index|slide)-aid-|view-)\d+.*',
         parameters   => []
     );
@@ -27,10 +27,10 @@ sub provide_url {
     $url =~ s/photos-slide/photos-index/;
     $logger->info("Processing Wnacg URL: $url");
 
-    # 改用全名調用以避免匯入錯誤
     my $html = LANraragi::Utils::Generic::get_html($url);
-    if (!$html) { return ( error => "Could not fetch index page." ); }
+    if (!$html) { return ( error => "Could not fetch Wnacg page." ); }
 
+    # 策略 1: 直接下載 ZIP
     if ($html =~ /href="(\/download-index-aid-\d+\.html)"/i) {
         my $dl_page = "https://www.wnacg.org" . $1;
         my $dl_html = LANraragi::Utils::Generic::get_html($dl_page);
@@ -41,6 +41,7 @@ sub provide_url {
         }
     }
 
+    # 策略 2: 圖片清單
     my @images;
     while ($html =~ /\/\/www\.wnacg\.(?:com|org|net)\/data\/t\/([^\s"']+)/gi) {
         my $p = $1; $p =~ s/\/t\//\/f\//;
@@ -48,7 +49,7 @@ sub provide_url {
     }
     
     return ( url_list => \@images, title => "Wnacg Archive" ) if scalar @images > 0;
-    return ( error => "No images or ZIP found." );
+    return ( error => "No content found." );
 }
 
 1;
