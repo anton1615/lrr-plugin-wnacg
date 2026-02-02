@@ -16,9 +16,9 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "5.4",
-        description  => "Download from wnacg.com (Manual Scrape + Deflate Compression)",
-        url_regex    => 'https?://(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-|photos-)\d+.*'
+        version      => "5.5",
+        description  => "Download from wnacg.com (Re-compression Mode for optimal size/naming)",
+        url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-|photos-|download-)\d+.*'
     );
 }
 
@@ -28,12 +28,12 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v5.4 Triggered (Manual Pack Mode) ---");
+    $logger->info("--- Wnacg Mojo v5.5 Triggered: $url ---");
     
     # URL 正規化
     if ($url =~ m#(?:aid-|view-aid-|photos-slide-aid-|photos-index-aid-|download-index-aid-)(\d+)#) {
         my $aid = $1;
-        my ($base) = $url =~ m#^(https?://[^/]+)#;
+        my ($base) = $url =~ m#^(https?:\/\/[^/]+)#;
         $url = "$base/photos-index-aid-$aid.html";
     }
     
@@ -47,69 +47,68 @@ sub provide_url {
     if ($res->is_success) {
         my $html = $res->body;
         
-        # 1. 提取標題
+        # 1. 提取完整標題
         my $title = "";
         if ($html =~ m#<h2>(.*?)</h2>#is) {
             $title = $1;
             $title =~ s#<[^>]*>##g; 
-            $title =~ s#[
-	]# #g;
+            $title =~ s#[\r\n\t]# #g;
             $title =~ s#\s+# #g;
             $title =~ s#[\/\\:\*?"<>\|]#_#g; 
             $title =~ s#^\s+|\s+$##g;
             if (length($title) > 150) { $title = substr($title, 0, 150); }
         }
 
-        # 2. 獲取圖片路徑前綴與總張數 (Wnacg 特色：預測式抓取)
-        my $img_prefix = "";
-        if ($html =~ m#//[^"']+/data/thumb/([^\s"']+/與嘅)\.jpg#i) {
-            $img_prefix = $1; # 格式如: 202105/12345/1
-            $img_prefix =~ s#/與嘅$##; # 拿掉最後的檔名，剩下目錄路徑
-        }
+        # 2. 獲取 AID 用於下載官方 ZIP
+        my $aid = "";
+        if ($url =~ m#aid-(\d+)#) { $aid = $1; }
 
-        my $total_images = 0;
-        if ($html =~ m#<span>(\d+)張圖片</span>#i) {
-            $total_images = $1;
-        }
-
-        if ($img_prefix && $total_images > 0 && $lrr_info->{tempdir}) {
-            my ($base_domain) = $html =~ m#//([^"']+)/data/thumb/#;
-            my $work_dir = $lrr_info->{tempdir} . "/wnacg_tmp";
-            mkdir $work_dir;
+        if ($aid) {
+            my ($base) = $url =~ m#^(https?:\/\/[^/]+)#;
+            my $dl_page = "$base/download-index-aid-$aid.html";
             
-            $logger->info("Scraping $total_images images from $base_domain...");
+            $logger->info("Accessing Download Page: $dl_page");
+            my $dl_res = $ua->get($dl_page)->result;
             
-            my $downloaded = 0;
-            for (my $i = 1; $i <= $total_images; $i++) {
-                my $img_url = "https://$base_domain/data/f/$img_prefix/$i.jpg";
-                my $save_to = sprintf("%s/%03d.jpg", $work_dir, $i);
-                
-                eval {
-                    my $img_tx = $ua->get($img_url => { Referer => $url });
-                    if ($img_tx->result->is_success) {
-                        $img_tx->result->save_to($save_to);
-                        $downloaded++;
-                    }
-                };
-            }
-
-            if ($downloaded > 0) {
-                my $zip_path = $lrr_info->{tempdir} . "/$title.zip";
-                my $zip = Archive::Zip->new();
-                for (my $i = 1; $i <= $total_images; $i++) {
-                    my $img_file = sprintf("%03d.jpg", $i);
-                    my $path = "$work_dir/$img_file";
-                    if (-e $path) {
-                        my $member = $zip->addFile($path, $img_file);
-                        $member->desiredCompressionMethod(COMPRESSION_DEFLATED); # 啟用壓縮
+            if ($dl_res->is_success) {
+                my $dl_html = $dl_res->body;
+                if ($dl_html =~ m|href="([^"]+\.zip[^"]*)"|i) {
+                    my $zip_url = $1;
+                    $zip_url = "https:" . $zip_url if $zip_url =~ m|^//|;
+                    
+                    if ($lrr_info->{tempdir}) {
+                        my $raw_zip = $lrr_info->{tempdir} . "/raw_$aid.zip";
+                        my $final_zip = $lrr_info->{tempdir} . "/$title.zip";
+                        
+                        $logger->info("Downloading official ZIP...");
+                        eval {
+                            $ua->get($zip_url, { Referer => $dl_page })->result->save_to($raw_zip);
+                        };
+                        
+                        if (!$@ && -s $raw_zip) {
+                            $logger->info("Official ZIP downloaded. Re-compressing...");
+                            
+                            # 關鍵：讀取原始 ZIP 並重新壓縮寫入
+                            my $zip_in = Archive::Zip->new();
+                            if ($zip_in->read($raw_zip) == AZ_OK) {
+                                my $zip_out = Archive::Zip->new();
+                                foreach my $member ($zip_in->members()) {
+                                    my $m = $zip_out->addMember($member);
+                                    $m->desiredCompressionMethod(COMPRESSION_DEFLATED);
+                                }
+                                $zip_out->writeToFileNamed($final_zip);
+                                
+                                unlink $raw_zip; # 刪除原始虛大檔案
+                                return ( file_path => abs_path($final_zip) );
+                            }
+                        }
+                        $logger->error("Wnacg ZIP processing failed.");
                     }
                 }
-                $zip->writeToFileNamed($zip_path);
-                return ( file_path => abs_path($zip_path) );
             }
         }
     }
-    return ( error => "Wnacg manual fetch failed." );
+    return ( error => "Wnacg download failed (v5.5)." );
 }
 
 1;
