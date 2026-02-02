@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "4.7",
-        description  => "Download from wnacg.com (List Return + AID naming)",
+        version      => "4.8",
+        description  => "Download from wnacg.com (Minion file_path Fix)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*'
     );
 }
@@ -24,7 +24,7 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v4.7 Triggered ---");
+    $logger->info("--- Wnacg Mojo v4.8 Triggered ---");
     
     # Normalize URL
     $url =~ s/photos-slide/photos-index/;
@@ -66,19 +66,19 @@ sub provide_url {
                         
                         if ($@) {
                             $logger->error("Download/Save failed: $@");
-                            return ( download_url => $zip_url );
+                            return { download_url => $zip_url };
                         }
                         
                         if (-s $save_path) {
-                            $logger->info("Download complete. Path: $save_path");
-                            # 恢復為 List 回傳，符合 nHentai.pm 標準
-                            return ( path => $save_path );
+                            $logger->info("Download complete. Handing off to LRR: $save_path");
+                            # 關鍵修正：必須回傳 file_path 鍵且格式為 HashRef
+                            return { file_path => $save_path };
                         } else {
                             $logger->error("Saved file is empty or missing.");
                         }
                     }
                     
-                    return ( download_url => $zip_url );
+                    return { download_url => $zip_url };
                 }
             }
         }
@@ -93,13 +93,13 @@ sub provide_url {
         
         if (scalar @images > 0) {
             $logger->info("SUCCESS: Found " . scalar @images . " images.");
-            return ( url_list => \@images );
+            return { url_list => \@images };
         }
     } else {
-        return ( error => "HTTP " . $res->code );
+        return { error => "HTTP " . $res->code };
     }
 
-    return ( error => "No content found on Wnacg." );
+    return { error => "No content found on Wnacg." };
 }
 
 1;
