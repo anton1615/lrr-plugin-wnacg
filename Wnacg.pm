@@ -15,9 +15,9 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "5.1",
-        description  => "Download from wnacg.com (Full Title + file_path Fix)",
-        url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-|photos-)\d+.*'
+        version      => "5.2",
+        description  => "Download from wnacg.com (Enhanced URL Normalization + Full Title)",
+        url_regex    => 'https?://(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-|photos-|download-)\d+.*'
     );
 }
 
@@ -27,11 +27,15 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v5.1 Triggered: $url ---");
+    $logger->info("--- Wnacg Mojo v5.2 Triggered: $url ---");
     
-    # Normalize URL (Handle photos-slide and photos-index)
-    $url =~ s#photos-slide#photos-index#;
-    $url =~ s#view-aid-#photos-index-aid-#;
+    # 強化版 URL 正規化 (全面導向 photos-index)
+    if ($url =~ m#(?:aid-|view-aid-|photos-slide-aid-|photos-index-aid-|download-index-aid-)(\d+)#) {
+        my $aid = $1;
+        my ($base) = $url =~ m#^(https?://[^/]+)#;
+        $url = "$base/photos-index-aid-$aid.html";
+        $logger->info("Normalized URL to Index: $url");
+    }
     
     # 使用 LRR 提供的 UserAgent
     my $ua = $lrr_info->{user_agent};
@@ -43,31 +47,32 @@ sub provide_url {
 
     if ($res->is_success) {
         my $html = $res->body;
-        $logger->info("Index page fetched. Size: " . length($html));
-
-        # 1. 提取完整標題 (參考 nHentai v2.8 邏輯)
+        
+        # 1. 提取完整標題
         my $title = "";
         if ($html =~ m#<h2>(.*?)</h2>#is) {
             $title = $1;
-            $title =~ s#<[^>]*>##g; # 移除 HTML 標籤
-            $title =~ s#[\r\n\t]# #g; # 換行轉空格
-            $title =~ s#\s+# #g; # 縮減連續空格
-            $title =~ s#[\/\\:\*\?"<>\|]#_#g; # 移除非法字元
-            $title =~ s#^\s+|\s+$##g; # 修剪空白
+            $title =~ s#<[^>]*>##g; 
+            $title =~ s#[\r\n\t]# #g;
+            $title =~ s#\s+# #g;
+            $title =~ s#[\/\\:\*\?"<>\|]#_#g; 
+            $title =~ s#^\s+|\s+$##g;
             
-            if (length($title) > 200) {
-                $title = substr($title, 0, 200);
-            }
+            if (length($title) > 200) { $title = substr($title, 0, 200); }
             $logger->info("Extracted Title: $title");
         }
 
-        # 2. 策略 1: 優先嘗試 ZIP 直接下載
-        if ($html =~ m|href="(\/download-index-aid-(\d+)\.html)"|i) {
-            my $aid = $2;
-            my ($base) = $url =~ m|^(https?://[^/]+)|;
+        # 2. 獲取 AID 用於下載頁面
+        my $aid = "";
+        if ($url =~ m#aid-(\d+)#) { $aid = $1; }
+
+        if ($aid) {
+            my ($base) = $url =~ m#^(https?://[^/]+)#;
             my $dl_page = "$base/download-index-aid-$aid.html";
             
+            $logger->info("Accessing Download Page: $dl_page");
             my $dl_res = $ua->get($dl_page)->result;
+            
             if ($dl_res->is_success) {
                 my $dl_html = $dl_res->body;
                 if ($dl_html =~ m|href="([^"]+\.zip[^"]*)"|i) {
@@ -75,11 +80,10 @@ sub provide_url {
                     $zip_url = "https:" . $zip_url if $zip_url =~ m|^//|;
                     
                     if ($lrr_info->{tempdir}) {
-                        # 使用清理後的標題作為暫存檔名
                         my $filename = $title || "wnacg_$aid";
                         my $save_path = $lrr_info->{tempdir} . "/$filename.zip";
                         
-                        $logger->info("Downloading ZIP to $save_path (Referer: $dl_page)...");
+                        $logger->info("Downloading ZIP to $save_path...");
                         eval {
                             $ua->get($zip_url, { Referer => $dl_page })->result->save_to($save_path);
                         };
@@ -94,7 +98,7 @@ sub provide_url {
             }
         }
 
-        # 3. 策略 2: 圖片清單 (備援)
+        # 3. 備援：圖片清單
         my @images;
         my ($base) = $url =~ m|^(https?://[^/]+)|;
         while ($html =~ m|//[^"']+/data/thumb/([^\s"']+)|gi) {
@@ -107,6 +111,7 @@ sub provide_url {
             return ( url_list => \@images );
         }
     } else {
+        $logger->error("Wnacg Access Error: " . $res->code);
         return ( error => "HTTP " . $res->code );
     }
 
