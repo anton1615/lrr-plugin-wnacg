@@ -12,7 +12,7 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "4.0",
+        version      => "4.1",
         description  => "Download from wnacg.com (Standard List Return)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*'
     );
