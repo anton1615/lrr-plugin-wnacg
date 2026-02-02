@@ -12,65 +12,49 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "2.1",
-        description  => "Download from wnacg.com (Direct ZIP support)",
+        version      => "2.6",
+        description  => "Download from wnacg.com (Fixed Package Name)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net)\/(?:photos-(?:index|slide)-aid-|view-)\d+.*',
         parameters   => []
     );
 }
 
 sub provide_url {
-    shift;
-    my $lrr_info = shift;
-    my $logger = get_logger( "Wnacg", "plugins" );
+    my ($self, $lrr_info, @params) = @_;
+    my $logger = get_logger("Wnacg", "plugins");
     my $url = $lrr_info->{url};
 
-    # Normalize URL: slide -> index
     $url =~ s/photos-slide/photos-index/;
-    $logger->info("Processing Wnacg URL: $url");
+    $logger->info("Target: $url");
 
     my $html = get_html($url);
-    if (!$html) {
-        return ( error => "Could not fetch index page." );
-    }
+    if (!$html) { return ( error => "No HTML content received from Wnacg." ); }
 
-    # 嘗試獲取直接下載 ZIP 的按鈕
+    # 策略 1: 尋找直接下載 ZIP 頁面
     if ($html =~ /href="(\/download-index-aid-\d+\.html)"/i) {
-        my $dl_page_url = "https://www.wnacg.org" . $1;
-        $logger->info("Found download page: $dl_page_url");
-        
-        my $dl_html = get_html($dl_page_url);
+        my $dl_page = "https://www.wnacg.org" . $1;
+        my $dl_html = get_html($dl_page);
         if ($dl_html && $dl_html =~ /href="([^"]+\.zip[^"]*)"/i) {
             my $zip_url = $1;
             $zip_url = "https:" . $zip_url if $zip_url =~ /^\/\//;
-            $logger->info("Direct ZIP URL found: $zip_url");
-            return (
-                url => $zip_url,
-                title => "Wnacg Archive (ZIP)"
-            );
+            $logger->info("Found direct ZIP URL: $zip_url");
+            return ( url => $zip_url, title => "Wnacg ZIP" );
         }
     }
 
-    # 備援：抓取圖片清單 (如果沒有 ZIP 下載)
+    # 策略 2: 備援抓取圖片清單
     my @images;
     while ($html =~ /\/\/www\.wnacg\.(?:com|org|net)\/data\/t\/([^\s"']+)/gi) {
-        my $path = $1;
-        $path =~ s/\/t\//\/f\//; 
-        push @images, "https://www.wnacg.org/data/f/" . $path;
+        my $p = $1; $p =~ s/\/t\//\/f\//;
+        push @images, "https://www.wnacg.org/data/f/" . $p;
     }
-
-    my %seen;
-    @images = grep { !$seen{$_}++ } @images;
-
+    
     if (scalar @images > 0) {
         $logger->info("Falling back to image list: " . scalar @images . " images.");
-        return (
-            url_list => \@images,
-            title    => "Wnacg Archive"
-        );
+        return ( url_list => \@images, title => "Wnacg Archive" );
     }
 
-    return ( error => "No content found on Wnacg." );
+    return ( error => "No images or ZIP found on Wnacg." );
 }
 
 1;
