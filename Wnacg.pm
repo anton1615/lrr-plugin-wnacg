@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "3.8",
-        description  => "Download from wnacg.com (Regex Fixed)",
+        version      => "3.9",
+        description  => "Download from wnacg.com (HashRef Return Fixed)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*',
         parameters   => []
     );
@@ -24,7 +24,7 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v3.8 ---");
+    $logger->info("--- Wnacg Mojo v3.9 Triggered ---");
     
     # Normalize URL
     $url =~ s/photos-slide/photos-index/;
@@ -38,47 +38,50 @@ sub provide_url {
 
     if ($res->is_success) {
         my $html = $res->body;
-        $logger->info("Index page fetched. Bytes: " . length($html));
+        $logger->info("Index page fetched. Size: " . length($html));
 
-        # 策略 1: ZIP 下載 (使用 | 定界符避免斜槓轉義問題)
+        # 策略 1: 直接下載 ZIP
         if ($html =~ m|href="(/download-index-aid-(\d+)\.html)"|i) {
             my $aid = $2;
-            my $base_url = $url;
-            $base_url =~ s|/photos-index.*||; # 取得域名根目錄
+            # 獲取當前網域的 base
+            my ($base) = $url =~ m|^(https?://[^/]+)|;
+            my $dl_page = "$base/download-index-aid-$aid.html";
             
-            my $dl_page = "$base_url/download-index-aid-$aid.html";
-            $logger->info("Found download page: $dl_page");
+            $logger->info("Checking download page: $dl_page");
+            my $dl_tx = $ua->get($dl_page);
+            my $dl_res = $dl_tx->result;
             
-            my $dl_res = $ua->get($dl_page)->result;
             if ($dl_res->is_success) {
                 my $dl_html = $dl_res->body;
                 if ($dl_html =~ m|href="([^"]+\.zip[^"]*)"|i) {
                     my $zip_url = $1;
                     $zip_url = "https:" . $zip_url if $zip_url =~ m|^//|;
-                    $logger->info("SUCCESS: ZIP URL: $zip_url");
-                    return ( url => $zip_url, title => "Wnacg ZIP $aid" );
+                    $logger->info("SUCCESS: Found ZIP URL: $zip_url");
+                    # 改用 HashRef 回傳
+                    return { url => $zip_url, title => "Wnacg ZIP $aid" };
                 }
             }
         }
 
         # 策略 2: 圖片清單
         my @images;
-        # 匹配 data/thumb/ 並轉為 data/f/ (原圖)
         while ($html =~ m|//[^"']+/data/thumb/([^\s"']+)|gi) {
             my $path = $1;
-            # Wnacg CDN 可能是 t1.qy0.ru 等
             push @images, "https://www.wnacg.org/data/f/" . $path;
         }
         
         if (scalar @images > 0) {
             $logger->info("SUCCESS: Found " . scalar @images . " images.");
-            return ( url_list => \@images, title => "Wnacg Archive" );
+            # 改用 HashRef 回傳
+            return { url_list => \@images, title => "Wnacg Gallery" };
         }
     } else {
         $logger->error("HTTP Error: " . $res->code);
+        return { error => "HTTP " . $res->code };
     }
 
-    return ( error => "No content found. Please check logs." );
+    $logger->error("No content found after parsing.");
+    return { error => "No content found on Wnacg." };
 }
 
 1;
