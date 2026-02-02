@@ -4,7 +4,9 @@ A custom downloader plugin for [LANraragi](https://github.com/Difegue/LANraragi)
 
 ## Features
 - **Full Auto-Download**: Supports direct ZIP extraction or image list fetching from Wnacg URLs.
-- **URL Normalization**: Handles `photos-index`, `photos-slide`, and `aid-xxxx` formats automatically.
+- **Intelligent Re-compression**: Automatically downloads the official ZIP and re-compresses it using **Deflate** algorithm to ensure optimal file size and structure.
+- **Full Title Extraction**: Automatically scrapes the complete Japanese title (including brackets and tags) from `<h2>` tags for meaningful file naming.
+- **URL Normalization**: Handles `photos-index`, `photos-slide`, `aid-xxxx`, and `view-` formats automatically.
 - **Multi-Domain Support**: Compatible with `wnacg.com`, `wnacg.org`, and `wnacg.net`.
 - **Modern Implementation**: Built using `Mojo::UserAgent` for robust connection handling and anti-hotlinking bypass.
 
