@@ -12,8 +12,8 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "3.7",
-        description  => "Download from wnacg.com (HTML Debug Mode)",
+        version      => "3.8",
+        description  => "Download from wnacg.com (Regex Fixed)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*',
         parameters   => []
     );
@@ -24,11 +24,11 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Debug v3.7 ---");
+    $logger->info("--- Wnacg Mojo v3.8 ---");
+    
+    # Normalize URL
     $url =~ s/photos-slide/photos-index/;
-    # 嘗試不強改域名，保持原始輸入
-    $logger->info("Fetching: $url");
-
+    
     my $ua = Mojo::UserAgent->new;
     $ua->transactor->name("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     $ua->max_redirects(5);
@@ -38,35 +38,47 @@ sub provide_url {
 
     if ($res->is_success) {
         my $html = $res->body;
-        $logger->info("HTML received (Length: " . length($html) . ")");
+        $logger->info("Index page fetched. Bytes: " . length($html));
 
-        # 輸出部分 HTML 到日誌以供分析
-        $logger->info("HTML Snippet: " . substr($html, 0, 500));
-
-        # 策略 1: ZIP
-        if ($html =~ /href="(\/download-index-aid-(\d+)\.html)"/i) {
+        # 策略 1: ZIP 下載 (使用 | 定界符避免斜槓轉義問題)
+        if ($html =~ m|href="(/download-index-aid-(\d+)\.html)"|i) {
             my $aid = $2;
-            $logger->info("Found aid: $aid");
-            return ( url => "https://www.wnacg.org/download-index-aid-$aid.html", title => "Wnacg ZIP $aid" );
+            my $base_url = $url;
+            $base_url =~ s|/photos-index.*||; # 取得域名根目錄
+            
+            my $dl_page = "$base_url/download-index-aid-$aid.html";
+            $logger->info("Found download page: $dl_page");
+            
+            my $dl_res = $ua->get($dl_page)->result;
+            if ($dl_res->is_success) {
+                my $dl_html = $dl_res->body;
+                if ($dl_html =~ m|href="([^"]+\.zip[^"]*)"|i) {
+                    my $zip_url = $1;
+                    $zip_url = "https:" . $zip_url if $zip_url =~ m|^//|;
+                    $logger->info("SUCCESS: ZIP URL: $zip_url");
+                    return ( url => $zip_url, title => "Wnacg ZIP $aid" );
+                }
+            }
         }
 
-        # 策略 2: 圖片 (更寬鬆的正則)
+        # 策略 2: 圖片清單
         my @images;
-        while ($html =~ /data-original=["']([^"']+\/data\/t\/[^"']+)["']/gi) {
-            my $p = $1; $p =~ s/\/t\//\/f\//;
-            $p = "https:" . $p if $p =~ /^\/\//;
-            push @images, $p;
+        # 匹配 data/thumb/ 並轉為 data/f/ (原圖)
+        while ($html =~ m|//[^"']+/data/thumb/([^\s"']+)|gi) {
+            my $path = $1;
+            # Wnacg CDN 可能是 t1.qy0.ru 等
+            push @images, "https://www.wnacg.org/data/f/" . $path;
         }
         
         if (scalar @images > 0) {
-            $logger->info("Found " . scalar @images . " images.");
-            return ( url_list => \@images, title => "Wnacg Gallery" );
+            $logger->info("SUCCESS: Found " . scalar @images . " images.");
+            return ( url_list => \@images, title => "Wnacg Archive" );
         }
     } else {
         $logger->error("HTTP Error: " . $res->code);
     }
 
-    return ( error => "No content. Check logs for HTML snippet." );
+    return ( error => "No content found. Please check logs." );
 }
 
 1;
