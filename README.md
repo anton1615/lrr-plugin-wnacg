@@ -14,14 +14,41 @@ A custom downloader plugin for [LANraragi](https://github.com/Difegue/LANraragi)
 
 ## Installation
 
-### 1. NixOS (Declarative Installation)
-If you are using NixOS, add the following to your configuration:
+### 1. NixOS (Declarative via Flakes - Recommended)
+The most elegant way to install this plugin is via Nix Flakes. This automates hash management.
+
+**Step 1: Add to your `flake.nix` inputs**
+```nix
+inputs.lrr-plugin-wnacg = {
+  url = "https://raw.githubusercontent.com/anton1615/lrr-plugin-wnacg/master/Wnacg.pm";
+  flake = false;
+};
+```
+
+**Step 2: Use in your LANraragi configuration**
+```nix
+{ inputs, ... }:
+{
+  virtualisation.oci-containers.containers.lanraragi.volumes = [
+    "${inputs.lrr-plugin-wnacg}:/home/koyomi/lanraragi/lib/LANraragi/Plugin/Download/Wnacg.pm:ro"
+  ];
+}
+```
+
+**Step 3: Update and Deploy**
+```bash
+nix flake update lrr-plugin-wnacg
+sudo nixos-rebuild switch --flake .
+```
+
+### 2. Traditional NixOS (fetchurl)
+If you are not using Flakes, add the following to your configuration:
 
 ```nix
 let
   wnacgPlugin = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/anton1615/lrr-plugin-wnacg/master/Wnacg.pm";
-    sha256 = "0iawqhfah0phsk4vvhm96lyr56i1qwphxnvy5idywbyq6rjj9025"; # Replace with actual hash
+    sha256 = "sha256-o5nPwMvg/mbkylquwtwFREfMjtxoBAN125awFyxdYc4=";
   };
 in {
   virtualisation.oci-containers.containers.lanraragi.volumes = [
@@ -30,7 +57,7 @@ in {
 }
 ```
 
-### 2. Manual Installation
+### 3. Manual Installation
 1. Download `Wnacg.pm` from this repository.
 2. Place it in the `/lib/LANraragi/Plugin/Sideloaded/` directory of your LANraragi installation.
 3. Restart LANraragi.
