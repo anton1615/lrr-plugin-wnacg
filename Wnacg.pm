@@ -7,6 +7,7 @@ no warnings 'uninitialized';
 # 確保在容器環境內能找到 LRR 的核心模組
 use lib '/home/koyomi/lanraragi/lib';
 use LANraragi::Utils::Logging qw(get_plugin_logger);
+use Mojo::UserAgent;
 use Cwd 'abs_path';
 
 sub plugin_info {
@@ -15,9 +16,9 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "5.2",
-        description  => "Download from wnacg.com (Enhanced URL Normalization + Full Title)",
-        url_regex    => 'https?://(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-|photos-|download-)\d+.*'
+        version      => "5.3",
+        description  => "Download from wnacg.com (Final Structure Fix)",
+        url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*?(?:aid-|view-|photos-|download-)\d+.*'
     );
 }
 
@@ -27,9 +28,9 @@ sub provide_url {
     my $logger = get_plugin_logger();
     my $url = $lrr_info->{url};
 
-    $logger->info("--- Wnacg Mojo v5.2 Triggered: $url ---");
+    $logger->info("--- Wnacg Mojo v5.3 Triggered: $url ---");
     
-    # 強化版 URL 正規化 (全面導向 photos-index)
+    # URL 正規化
     if ($url =~ m#(?:aid-|view-aid-|photos-slide-aid-|photos-index-aid-|download-index-aid-)(\d+)#) {
         my $aid = $1;
         my ($base) = $url =~ m#^(https?://[^/]+)#;
@@ -37,8 +38,7 @@ sub provide_url {
         $logger->info("Normalized URL to Index: $url");
     }
     
-    # 使用 LRR 提供的 UserAgent
-    my $ua = $lrr_info->{user_agent};
+    my $ua = $lrr_info->{user_agent} || Mojo::UserAgent->new;
     $ua->max_redirects(5);
     $ua->transactor->name('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36');
 
@@ -55,14 +55,12 @@ sub provide_url {
             $title =~ s#<[^>]*>##g; 
             $title =~ s#[\r\n\t]# #g;
             $title =~ s#\s+# #g;
-            $title =~ s#[\/\\:\*\?"<>\|]#_#g; 
+            $title =~ s#[\/\\:\*?"<>\|]#_#g; 
             $title =~ s#^\s+|\s+$##g;
-            
-            if (length($title) > 200) { $title = substr($title, 0, 200); }
-            $logger->info("Extracted Title: $title");
+            if (length($title) > 150) { $title = substr($title, 0, 150); }
         }
 
-        # 2. 獲取 AID 用於下載頁面
+        # 2. 獲取 AID
         my $aid = "";
         if ($url =~ m#aid-(\d+)#) { $aid = $1; }
 
@@ -89,7 +87,7 @@ sub provide_url {
                         };
                         
                         if (!$@ && -s $save_path) {
-                            $logger->info("ZIP Download successful.");
+                            $logger->info("ZIP Download successful: $save_path");
                             return ( file_path => abs_path($save_path) );
                         }
                         $logger->error("ZIP Download failed: $@");
@@ -102,20 +100,18 @@ sub provide_url {
         my @images;
         my ($base) = $url =~ m|^(https?://[^/]+)|;
         while ($html =~ m|//[^"']+/data/thumb/([^\s"']+)|gi) {
-            my $path = $1;
-            push @images, "$base/data/f/" . $path;
+            push @images, "$base/data/f/" . $1;
         }
         
         if (scalar @images > 0) {
-            $logger->info("SUCCESS: Found " . scalar @images . " images. Returning list.");
+            $logger->info("SUCCESS: Found " . scalar @images . " images.");
             return ( url_list => \@images );
         }
     } else {
-        $logger->error("Wnacg Access Error: " . $res->code);
         return ( error => "HTTP " . $res->code );
     }
 
-    return ( error => "No content found on Wnacg." );
+    return ( error => "No content found." );
 }
 
 1;
