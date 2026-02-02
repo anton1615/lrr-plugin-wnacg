@@ -12,7 +12,7 @@ sub plugin_info {
         type         => "download",
         namespace    => "wnacg",
         author       => "Gemini CLI",
-        version      => "4.1",
+        version      => "4.2",
         description  => "Download from wnacg.com (Standard List Return)",
         url_regex    => 'https?:\/\/(?:www\.)?wnacg\.(?:com|org|net).*(?:aid-|view-)\d+.*'
     );
@@ -61,9 +61,10 @@ sub provide_url {
 
         # 策略 2: 圖片清單
         my @images;
+        my ($base) = $url =~ m|^(https?://[^/]+)|;
         while ($html =~ m|//[^"']+/data/thumb/([^\s"']+)|gi) {
             my $path = $1;
-            push @images, "https://www.wnacg.org/data/f/" . $path;
+            push @images, "$base/data/f/" . $path;
         }
         
         if (scalar @images > 0) {
